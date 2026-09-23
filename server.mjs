@@ -90,9 +90,9 @@ const server = http.createServer(async(req,res)=>{
   res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
   try {
     const url=new URL(req.url,'http://localhost');
-    // Reject cross-site writes: the request must originate from this same host.
+    // Reject cross-site writes: compare origin host against this request's host (proxy header aware).
     const mutation=!['GET','HEAD'].includes(req.method);
-    if(mutation&&req.headers.origin){let originHost='';try{originHost=new URL(req.headers.origin).host}catch{}if(originHost!==req.headers.host)return json(res,403,{error:'Недопустимый источник запроса.'});}
+    if(mutation&&req.headers.origin){let originHost='';try{originHost=new URL(req.headers.origin).host}catch{};const hosts=new Set([req.headers.host,String(req.headers['x-forwarded-host']||'').split(',')[0].trim()].filter(Boolean));if(!hosts.has(originHost))return json(res,403,{error:'Недопустимый источник запроса.'});}
     if(mutation && req.headers['sec-fetch-site']==='cross-site') return json(res,403,{error:'Недопустимый источник запроса.'});
     if(url.pathname.startsWith('/api/admin/')&&!isAdmin(req))return json(res,401,{error:'Войдите в аккаунт администратора.'});
     if(url.pathname==='/api/session' && req.method==='GET') return json(res,200,{admin:isAdmin(req)});
