@@ -2,14 +2,14 @@ const loginDialog=$('#login-dialog'), contactDialog=$('#contact-dialog');
 let admin=false, contacts=null, resumeAfterContacts=false;
 function setAdmin(value){
   admin=value;
-  $('#login-button').innerHTML=(admin?'Админ':'Логин')+' '+icon('arrow-up-right');
+  const loginButton=$('#login-button');if(loginButton)loginButton.innerHTML=(admin?'Админ':'Логин')+' '+icon('arrow-up-right');
   $('#login-form').hidden=admin;$('#admin-panel').hidden=!admin;
   $('#login-title').textContent=admin?'Администрация':'Вход в аккаунт';
 }
 async function checkSession(){
   try{const response=await fetch('/api/session');if(!response.ok)throw Error();setAdmin((await response.json()).admin);}catch{setAdmin(false);}
 }
-$('#login-button').onclick=async()=>{await checkSession();$('#login-error').textContent='';$('#admin-error').textContent='';if(admin){location.href='/admin.html';return;}showDialog(loginDialog);$('#admin-login').focus();};
+const headerLogin=$('#login-button');if(headerLogin)headerLogin.onclick=async()=>{await checkSession();$('#login-error').textContent='';$('#admin-error').textContent='';if(admin){location.href='/admin.html';return;}showDialog(loginDialog);$('#admin-login').focus();};
 $('#close-login').onclick=()=>loginDialog.close();
 loginDialog.addEventListener('close',e=>{$('#admin-password').value='';releaseDialog(e);});
 loginDialog.onclick=e=>{if(e.target===loginDialog)loginDialog.close();};
@@ -60,4 +60,10 @@ document.querySelectorAll('[data-contact-open]').forEach(button=>button.onclick=
 $('#close-contacts').onclick=()=>contactDialog.close();
 contactDialog.onclick=e=>{if(e.target===contactDialog)contactDialog.close();};
 contactDialog.addEventListener('close',e=>{releaseDialog(e);if(resumeAfterContacts&&storyDialog.open&&paused)togglePause();resumeAfterContacts=false;});
+const locationDialog=$('#location-dialog');
+async function openLocation(){await loadContacts();const c=contacts||{};const map=$('#location-map');const parts=typeof c.coordinates==='string'?c.coordinates.split(',').map(Number):[];if(parts.length===2&&Number.isFinite(parts[0])&&Number.isFinite(parts[1])){map.style.display='';map.src='https://yandex.ru/map-widget/v1/?ll='+parts[1]+'%2C'+parts[0]+'&z=16&pt='+parts[1]+'%2C'+parts[0]+'%2Cpm2_rtag';}else{map.style.display='none';map.removeAttribute('src');}$('#location-address').textContent=c.address||'Адрес магазин ещё не указал.';showDialog(locationDialog);}
+document.querySelectorAll('[data-location-open]').forEach(button=>button.onclick=e=>{e.preventDefault();openLocation();});
+$('#close-location').onclick=()=>locationDialog.close();
+locationDialog.onclick=e=>{if(e.target===locationDialog)locationDialog.close();};
+locationDialog.addEventListener('close',e=>{releaseDialog(e);$('#location-map').removeAttribute('src');});
 checkSession();loadContacts();

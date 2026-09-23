@@ -57,7 +57,7 @@ test('admin authentication, upload authorization, media ranges and persistence',
   assert.equal((await request(`/api/admin/stories/${draft.id}`,'PATCH',{title:'Нельзя'})).status,409);
   const restored=await (await request(`/api/admin/stories/${draft.id}/restore`,'POST')).json();assert.equal(restored.status,'draft');assert.equal(restored.deletedAt,null);
   assert.equal((await (await request('/api/stories')).json()).some(s=>s.id===draft.id),false);
-  const contactUpdate={telegram:'https://t.me/flower_test',max:'https://max.ru/flower_test',whatsapp:'https://wa.me/79991234567'};
+  const contactUpdate={telegram:'https://t.me/flower_test',max:'https://max.ru/flower_test',whatsapp:'https://wa.me/79991234567',address:'Тестовая улица, 5',coordinates:'55.7522,37.6155'};
   assert.equal((await request('/api/admin/contacts','PUT',{...contactUpdate,max:'javascript:alert(1)'})).status,400);
   assert.equal((await request('/api/admin/contacts','PUT',contactUpdate)).status,200);assert.deepEqual(await (await request('/api/contacts')).json(),contactUpdate);
   assert.equal((await request('/api/admin/contacts','PUT',{telegram:'https://t.me/tochnoda_ru',max:'',whatsapp:''})).status,200);

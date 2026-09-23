@@ -148,11 +148,11 @@ function openPreview(s){
   $('#preview-media').replaceChildren(media);$('#preview-title').textContent=s.title;$('#preview-caption').textContent=s.caption;show(preview);
 }
 $('#close-preview').onclick=()=>preview.close();preview.addEventListener('close',()=>{$('#preview-media video')?.pause();$('#preview-media').replaceChildren();});
-async function loadSettings(){const values=await api('/api/contacts');for(const key of ['telegram','max','whatsapp'])$('#setting-'+key).value=values[key]||'';settingsDirty=false;$('#settings-saved').textContent='';}
+async function loadSettings(){const values=await api('/api/contacts');for(const key of ['telegram','max','whatsapp','address','coordinates'])$('#setting-'+key).value=values[key]||'';settingsDirty=false;$('#settings-saved').textContent='';}
 $('#settings-form').oninput=()=>{settingsDirty=true;settingsVersion++;$('#settings-saved').textContent='Есть несохранённые изменения';};
 $('#settings-form').onsubmit=async e=>{
   e.preventDefault();const button=$('button[type=submit]',e.target);if(button.disabled)return;button.disabled=true;$('#settings-error').textContent='';
-  const payload={};for(const key of ['telegram','max','whatsapp'])payload[key]=$('#setting-'+key).value.trim();
+  const payload={};for(const key of ['telegram','max','whatsapp','address','coordinates'])payload[key]=$('#setting-'+key).value.trim();
   if(payload.whatsapp&&!/^https:\/\//.test(payload.whatsapp)){
     const number=payload.whatsapp.replace(/[+\s()\-]/g,'');if(!/^\d{7,15}$/.test(number)){$('#settings-error').textContent='Введите номер WhatsApp с кодом страны или ссылку https://wa.me/…';button.disabled=false;return;}payload.whatsapp='https://wa.me/'+number;
   }

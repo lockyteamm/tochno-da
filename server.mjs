@@ -42,7 +42,7 @@ for(const story of stories){
 }
 if(viewsMigrated)save();
 const contactsPath=path.join(dataDir,'contacts.json');
-const readContacts=()=>fs.existsSync(contactsPath)?JSON.parse(fs.readFileSync(contactsPath,'utf8')):{telegram:'https://t.me/tochnoda_ru',max:null,whatsapp:null};
+const readContacts=()=>fs.existsSync(contactsPath)?JSON.parse(fs.readFileSync(contactsPath,'utf8')):{telegram:'https://t.me/tochnoda_ru',max:null,whatsapp:null,address:null,coordinates:null};
 function fail(message,status=400){const error=new Error(message);error.status=status;throw error;}
 function textFields(input){
   if(typeof input.title!=='string'||!input.title.trim()||input.title.length>80)fail('Введите название до 80 символов.');
@@ -67,6 +67,13 @@ function validateContacts(input){
     if(url.protocol!=='https:'||!hosts[name].includes(url.hostname)||url.username||url.password||url.port||url.pathname==='/')fail(`Недопустимая ссылка для ${name}.`);
     output[name]=url.href;
   }
+  const address=input.address;
+  if(address===undefined||address===null||address==='')output.address=null;
+  else if(typeof address!=='string'||!address.trim()||address.trim().length>160)fail('Проверьте адрес магазина — до 160 символов.');
+  else output.address=address.trim();
+  const coordinates=input.coordinates;
+  if(coordinates===undefined||coordinates===null||coordinates==='')output.coordinates=null;
+  else{const m=typeof coordinates==='string'&&coordinates.trim().match(/^(-?\d{1,2}(?:\.\d{1,8})?)\s*,\s*(-?\d{1,3}(?:\.\d{1,8})?)$/);if(!m||Math.abs(Number(m[1]))>90||Math.abs(Number(m[2]))>180)fail('Координаты — широта и долгота через запятую, например 55.7522, 37.6155');output.coordinates=m[1]+','+m[2];}
   return output;
 }
 const json = (res, status, body) => { res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body)); };
