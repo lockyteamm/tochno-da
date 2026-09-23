@@ -178,4 +178,4 @@ const server = http.createServer(async(req,res)=>{
     fs.createReadStream(file,{start,end}).on('error',()=>res.destroy()).pipe(res);
   } catch(e) { if(!res.headersSent) json(res,e.status||500,{error:e.status?e.message:'Не удалось сохранить историю. Попробуйте ещё раз.'}); else res.destroy(); }
 });
-server.listen(Number(process.env.PORT||4173),'127.0.0.1',()=>console.log(`ТОЧНО ДА → http://localhost:${server.address().port}`));
+server.listen(Number(process.env.PORT||4173),process.env.HOST||'0.0.0.0',()=>console.log(`ТОЧНО ДА → http://localhost:${server.address().port}`));
