@@ -1,0 +1,5 @@
+server.log
+server-error.log
+tmp-logo-build/
+tmp-logo-test/
+node_modules/
