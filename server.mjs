@@ -1,13 +1,16 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
 import { randomUUID, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = process.env.DATA_DIR || path.join(root, 'data');
 const uploadDir = path.join(dataDir, 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
+const maxUpload = 80 * 1024 * 1024;
 const dbPath = path.join(dataDir, 'stories.json');
 const passwordSalt = randomBytes(16);
 const passwordHash = scryptSync(process.env.ADMIN_PASSWORD || 'Admin123', passwordSalt, 64);
@@ -41,6 +44,12 @@ for(const story of stories){
   if(!story.randomViewsAssigned){story.views=randomInt(1000,10001);story.randomViewsAssigned=true;viewsMigrated=true;}
 }
 if(viewsMigrated)save();
+// Файл загружен, но история не сохранена (окно закрыли посередине) — не должен лежать вечно.
+for(const name of fs.readdirSync(uploadDir)){
+  const orphan=path.join(uploadDir,name);
+  if(stories.some(s=>s.src===`/uploads/${name}`||s.cover===`/uploads/${name}`))continue;
+  if(Date.now()-fs.statSync(orphan).mtimeMs>24*60*60*1000)fs.rmSync(orphan,{force:true});
+}
 const contactsPath=path.join(dataDir,'contacts.json');
 const readContacts=()=>fs.existsSync(contactsPath)?JSON.parse(fs.readFileSync(contactsPath,'utf8')):{telegram:'https://t.me/tochnoda_ru',max:null,whatsapp:null,address:null,coordinates:null};
 function fail(message,status=400){const error=new Error(message);error.status=status;throw error;}
@@ -51,14 +60,72 @@ function textFields(input){
   if(input.status!==undefined&&!['published','draft'].includes(input.status))fail('Неизвестный статус публикации.');
   return {title:input.title.trim(),caption:input.caption||'',bouquet:typeof input.bouquet==='string'?input.bouquet.trim():'',status:input.status||'published'};
 }
-function storeMedia(data){
-  if(typeof data!=='string'||!/^[A-Za-z0-9+/]+={0,2}$/.test(data))fail('Не удалось прочитать файл.');
-  const bytes=Buffer.from(data,'base64');
-  if(bytes.length>30*1024*1024)fail('Максимальный размер файла — 30 МБ.',413);
-  const kind=sniff(bytes);if(!kind)fail('Поддерживаются JPG, PNG, WebP, GIF, MP4 и WebM.');
-  const filename=`${randomUUID()}.${kind[1]}`;fs.writeFileSync(path.join(uploadDir,filename),bytes);
-  return {src:`/uploads/${filename}`,type:kind[0]};
+const uploadedName=/^\/uploads\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(jpg|png|webp|gif|mp4|mov|webm))$/;
+function attachMedia(input){
+  const match=typeof input?.src==='string'?input.src.match(uploadedName):null;
+  if(!match)fail('Сначала загрузите фото или видео.');
+  const src=`/uploads/${match[1]}`;
+  if(!fs.existsSync(path.join(uploadDir,match[1])))fail('Файл не дождётся публикации — загрузите его ещё раз.');
+  if(stories.some(s=>s.src===src))fail('Этот файл уже стоит в другой публикации.');
+  return {src,type:/^(mp4|mov|webm)$/.test(match[2])?'video':'image'};
 }
+const heicTool=process.env.HEIC_TOOL||'magick';
+// Имена файлов генерируем сами (uuid), оболочка не подключается — путей от клиента тут нет.
+function convertHeic(name){
+  const source=path.join(uploadDir,name),target=source.slice(0,-5)+'.jpg';
+  return new Promise(resolve=>{
+    execFile(heicTool,[source,'-auto-orient','-resize','2400x2400>','-quality','86',target],{timeout:60000},error=>{
+      resolve(!error&&fs.existsSync(target)&&fs.statSync(target).size>1024?path.basename(target):null);
+    });
+  });
+}
+async function saveStream(req){
+  let received=0,pending=Buffer.alloc(0),out=null,filename=null,failure=null;
+  const write=async bytes=>{
+    if(!out.write(bytes))await Promise.race([once(out,'drain').catch(()=>{}),once(out,'close').catch(()=>{})]);
+    if(failure)throw failure;
+  };
+  const create=async bytes=>{
+    const kind=sniff(bytes);if(!kind)fail('Поддерживаются JPG, PNG, WebP, GIF, MP4, MOV, WebM и HEIC.');
+    filename=`${randomUUID()}.${kind[1]}`;
+    out=fs.createWriteStream(path.join(uploadDir,filename));
+    out.once('error',error=>{failure=error;});
+    await once(out,'open');
+  };
+  try{
+    for await(const chunk of req){
+      received+=chunk.length;
+      if(received>maxUpload)fail(`Максимальный размер файла — ${Math.round(maxUpload/1024/1024)} МБ.`,413);
+      if(out){await write(chunk);continue;}
+      pending=Buffer.concat([pending,chunk]);
+      if(pending.length>=1024){const head=pending;pending=null;await create(head.subarray(0,1024));await write(head);}
+    }
+    if(!out){if(!pending.length)fail('Файл пустой.');await create(pending.subarray(0,1024));await write(pending);}
+    out.end();
+    await Promise.race([once(out,'finish').catch(()=>{}),once(out,'close').catch(()=>{})]);
+    if(failure)throw failure;
+    if(filename.endsWith('.heic')){
+      const jpg=await convertHeic(filename);
+      fs.rmSync(path.join(uploadDir,filename),{force:true});
+      if(!jpg)fail('HEIC не удалось превратить в JPG — на сервере нужен ImageMagick. Сохраните фото как JPG и загрузите снова.',415);
+      filename=jpg;
+    }
+    return attachMedia({src:`/uploads/${filename}`});
+  }catch(error){
+    out?.destroy();
+    if(filename)fs.rmSync(path.join(uploadDir,filename),{force:true});
+    throw error;
+  }
+}
+function storeCover(data){
+  if(typeof data!=='string'||!/^[A-Za-z0-9+/]+={0,2}$/.test(data))fail('Не удалось прочитать обложку.');
+  const bytes=Buffer.from(data,'base64');
+  if(bytes.length>4*1024*1024)fail('Обложка получилась слишком большой.');
+  const kind=sniff(bytes);if(!kind||kind[0]!=='image')fail('Обложкой может быть только кадр из видео.');
+  const filename=`${randomUUID()}.${kind[1]}`;fs.writeFileSync(path.join(uploadDir,filename),bytes);
+  return `/uploads/${filename}`;
+}
+function dropFile(src){const target=path.join(uploadDir,path.basename(String(src||'')));if(src&&target.startsWith(uploadDir+path.sep)&&fs.existsSync(target))fs.unlinkSync(target);}
 function validateContacts(input){
   const output={};const hosts={telegram:['t.me'],max:['max.ru','www.max.ru'],whatsapp:['wa.me','api.whatsapp.com']};
   for(const name of Object.keys(hosts)){
@@ -78,19 +145,23 @@ function validateContacts(input){
   return output;
 }
 const json = (res, status, body) => { res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body)); };
-const mime = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.mp4':'video/mp4','.webm':'video/webm','.svg':'image/svg+xml'};
+const mime = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.mp4':'video/mp4','.mov':'video/quicktime','.webm':'video/webm','.svg':'image/svg+xml'};
 function sniff(b) {
   if (b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return ['image','png'];
   if(b[0]===255 && b[1]===216 && b[2]===255) return ['image','jpg'];
   if(b.toString('ascii',0,4)==='RIFF' && b.toString('ascii',8,12)==='WEBP') return ['image','webp'];
   if(/^GIF8[79]a$/.test(b.toString('ascii',0,6))) return ['image','gif'];
+  // QuickTime (.mov) тоже лежит в ISO-BMFF, поэтому проверяем раньше общих mp4-брендов.
+  if(b.toString('ascii',4,8)==='ftyp' && b.toString('ascii',8,12)==='qt  ') return ['video','mov'];
+  // HEIC/HEIF фото айфона: читаем только на macOS и iOS, поэтому сразу превращаем в JPG.
+  if(b.toString('ascii',4,8)==='ftyp' && /^hei[cmxs]$/.test(b.toString('ascii',8,12)) && !/avif/.test(b.toString('ascii',8,40))) return ['image','heic'];
   if(b.toString('ascii',4,8)==='ftyp' && /isom|iso2|mp4|avc1|M4V|MSNV/.test(b.toString('ascii',8,40))) return ['video','mp4'];
   if(b.subarray(0,4).equals(Buffer.from([26,69,223,163])) && b.subarray(0,256).includes(Buffer.from('webm'))) return ['video','webm'];
   return null;
 }
-async function body(req, limit=43*1024*1024) {
+async function body(req, limit=6*1024*1024) {
   let size=0; const chunks=[];
-  for await(const chunk of req) { size+=chunk.length; if(size>limit) { const e=new Error('Запрос слишком большой. Максимум для файла — 30 МБ.'); e.status=413; throw e; } chunks.push(chunk); }
+  for await(const chunk of req) { size+=chunk.length; if(size>limit) { const e=new Error('Слишком длинный запрос.'); e.status=413; throw e; } chunks.push(chunk); }
   try { return JSON.parse(Buffer.concat(chunks).toString()); } catch { const e=new Error('Некорректный запрос.'); e.status=400; throw e; }
 }
 const server = http.createServer(async(req,res)=>{
@@ -128,6 +199,10 @@ const server = http.createServer(async(req,res)=>{
       const input=validateContacts(await body(req,8192));
       fs.writeFileSync(contactsPath+'.tmp',JSON.stringify(input,null,2));fs.renameSync(contactsPath+'.tmp',contactsPath);return json(res,200,input);
     }
+    if(url.pathname==='/api/admin/media' && req.method==='POST'){
+      if(Number(req.headers['content-length']||0)>maxUpload)return json(res,413,{error:`Максимальный размер файла — ${Math.round(maxUpload/1024/1024)} МБ.`});
+      return json(res,201,await saveStream(req));
+    }
     if(url.pathname==='/api/admin/stories' && req.method==='GET')return json(res,200,stories);
     if(url.pathname==='/api/admin/stories/reorder' && req.method==='POST'){
       const {ids}=await body(req,1024*1024);const active=stories.filter(s=>!s.deletedAt);
@@ -139,9 +214,9 @@ const server = http.createServer(async(req,res)=>{
       const item=stories.find(s=>s.id===adminStory[1]);if(!item)return json(res,404,{error:'Публикация не найдена.'});
       if(adminStory[2]==='/purge' && req.method==='POST'){
         if(!item.deletedAt)return json(res,409,{error:'Сначала уберите публикацию в корзину.'});
-        const media=path.join(uploadDir,path.basename(String(item.src||'')));
+        const removed=[item.src,item.cover];
         stories=stories.filter(s=>s.id!==item.id);save();
-        if(media.startsWith(uploadDir+path.sep)&&fs.existsSync(media))fs.unlinkSync(media);
+        for(const src of removed)dropFile(src);
         return json(res,200,{removed:item.id});
       }
       if(adminStory[2]==='/restore' && req.method==='POST'){
@@ -156,8 +231,15 @@ const server = http.createServer(async(req,res)=>{
         if(item.deletedAt)return json(res,409,{error:'Сначала восстановите публикацию из корзины.'});
         const input=await body(req);
         if(input.expectedUpdatedAt && input.expectedUpdatedAt!==item.updatedAt)return json(res,409,{error:'Публикация уже изменена в другой вкладке. Обновите панель.'});
-        const fields=textFields({...item,...input});const media=input.data!==undefined?storeMedia(input.data):{};
-        Object.assign(item,fields,media,{updatedAt:new Date().toISOString()});save();return json(res,200,item);
+        const fields=textFields({...item,...input});const media=input.media!==undefined?attachMedia(input.media):{};
+        let cover=item.cover||null;
+        if(input.media!==undefined&&input.cover===undefined){dropFile(cover);cover=null;}
+        else if(input.cover===null){dropFile(cover);cover=null;}
+        else if(typeof input.cover==='string'){dropFile(cover);cover=storeCover(input.cover);}
+        const previous=item.src;
+        Object.assign(item,fields,media,{cover,updatedAt:new Date().toISOString()});save();
+        if(media.src&&media.src!==previous)dropFile(previous);
+        return json(res,200,item);
       }
       return json(res,405,{error:'Метод не поддерживается.'});
     }
@@ -165,15 +247,15 @@ const server = http.createServer(async(req,res)=>{
     if(url.pathname==='/api/stories' && req.method==='POST') {
       if(!isAdmin(req)) return json(res,401,{error:'Загрузка доступна только администрации. Войдите в аккаунт.'});
       const input=await body(req);
-      const fields=textFields(input);const media=storeMedia(input.data);const now=new Date().toISOString();
-      const item={id:randomUUID(),...fields,...media,views:randomInt(1000,10001),randomViewsAssigned:true,createdAt:now,updatedAt:now,deletedAt:null};
+      const fields=textFields(input);const media=attachMedia(input.media);const now=new Date().toISOString();
+      const item={id:randomUUID(),...fields,...media,cover:typeof input.cover==='string'&&input.cover?storeCover(input.cover):null,views:randomInt(1000,10001),randomViewsAssigned:true,createdAt:now,updatedAt:now,deletedAt:null};
       stories.unshift(item); save(); return json(res,201,item);
     }
     const view=url.pathname.match(/^\/api\/stories\/([a-z0-9-]+)\/view$/);
     if(view && req.method==='POST') { const item=stories.find(s=>s.id===view[1]&&visible(s)); if(!item) return json(res,404,{error:'История не найдена.'}); item.views=Math.min(10000,item.views+1); save(); return json(res,200,{views:item.views}); }
     if(!['GET','HEAD'].includes(req.method)) return json(res,405,{error:'Метод не поддерживается.'});
     const isUpload=url.pathname.startsWith('/uploads/');
-    if(isUpload){res.setHeader('Cache-Control','no-store');if(!isAdmin(req)&&!stories.some(s=>visible(s)&&s.src===url.pathname))return json(res,404,{error:'Не найдено.'});}
+    if(isUpload){res.setHeader('Cache-Control','no-store');if(!isAdmin(req)&&!stories.some(s=>visible(s)&&(s.src===url.pathname||s.cover===url.pathname)))return json(res,404,{error:'Не найдено.'});}
     const base=isUpload?uploadDir:path.join(root,'public');
     const relative=isUpload?url.pathname.slice(9):(url.pathname==='/'?'index.html':decodeURIComponent(url.pathname).slice(1));
     const file=path.resolve(base,relative);
@@ -193,4 +275,6 @@ const server = http.createServer(async(req,res)=>{
     fs.createReadStream(file,{start,end}).on('error',()=>res.destroy()).pipe(res);
   } catch(e) { if(!res.headersSent) json(res,e.status||500,{error:e.status?e.message:'Не удалось сохранить историю. Попробуйте ещё раз.'}); else res.destroy(); }
 });
+// 80 МБ с мобильного интернета грузятся минутами — стандартные 300 с Node на это не рассчитаны.
+server.requestTimeout=15*60*1000;
 server.listen(Number(process.env.PORT||4173),process.env.HOST||'0.0.0.0',()=>console.log(`ТОЧНО ДА → http://localhost:${server.address().port}`));

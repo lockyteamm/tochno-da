@@ -1,15 +1,32 @@
 [
   {
-    "id": "27c5a9c6-ac3b-4154-aec9-ad13007b7275",
-    "title": "453543",
-    "caption": "534534",
+    "id": "0ed8b0ce-19be-4d80-bedb-318118b24407",
+    "title": "4у234",
+    "caption": "234324",
+    "bouquet": "Диантус 15 штук\nРоза 2 штуки",
     "status": "published",
-    "src": "/uploads/96511394-9c16-4772-b619-a2a15cb26518.mp4",
+    "src": "/uploads/71b536b9-e360-464d-bf0d-2f1107f03b41.mp4",
     "type": "video",
-    "views": 4964,
+    "cover": "/uploads/590bfbab-0160-432b-ad49-a801f18a7465.jpg",
+    "views": 3657,
     "randomViewsAssigned": true,
-    "createdAt": "2026-09-23T12:51:23.923Z",
-    "updatedAt": "2026-09-23T12:51:32.716Z",
-    "deletedAt": "2026-09-23T12:51:32.716Z"
+    "createdAt": "2026-09-25T12:52:26.017Z",
+    "updatedAt": "2026-09-25T12:52:33.974Z",
+    "deletedAt": null
+  },
+  {
+    "id": "72f2659e-8e3e-4009-bdc8-4a53cba32742",
+    "title": "5435",
+    "caption": "43534",
+    "bouquet": "534534",
+    "status": "published",
+    "src": "/uploads/f7fd0ae6-4207-4b13-b9d4-81960f92525f.mp4",
+    "type": "video",
+    "cover": "/uploads/0cd3af8e-4b16-4b02-8052-aeef3624c0d1.jpg",
+    "views": 9476,
+    "randomViewsAssigned": true,
+    "createdAt": "2026-09-25T12:49:13.881Z",
+    "updatedAt": "2026-09-25T12:49:35.870Z",
+    "deletedAt": null
   }
 ]

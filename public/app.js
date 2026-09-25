@@ -12,7 +12,7 @@ function toast(message){$('#toast').textContent=message;$('#toast').classList.ad
 function list(){return stories;}
 function render(){
   const visible=list(); $('#empty-state').hidden=!!visible.length;
-  $('#feed').innerHTML=visible.map(s=>`<article class="story-card"><button class="card-open" data-open="${s.id}" aria-label="Открыть историю: ${escapeHTML(s.title)}">${s.type==='video'?`<video src="${s.src}#t=0.1" preload="metadata" muted playsinline></video>`:`<img src="${s.src}" alt="${escapeHTML(s.title)}" loading="lazy">`}<span class="card-gradient"></span><span class="card-kind">${icon(s.type==='video'?'play':'image')}</span><div class="card-copy"><h3>${escapeHTML(s.title)}</h3><div class="card-meta"><span>${icon('eye')} ${s.views}</span><span>${s.type==='video'?'Видео':'Фотоистория'}</span></div></div></button></article>`).join('');
+  $('#feed').innerHTML=visible.map(s=>`<article class="story-card"><button class="card-open" data-open="${s.id}" aria-label="Открыть историю: ${escapeHTML(s.title)}">${s.type==='video'&&!s.cover?`<video src="${s.src}#t=0.1" preload="metadata" muted playsinline></video>`:`<img src="${s.cover||s.src}" alt="${escapeHTML(s.title)}" loading="lazy">`}<span class="card-gradient"></span><span class="card-kind">${icon(s.type==='video'?'play':'image')}</span><div class="card-copy"><h3>${escapeHTML(s.title)}</h3><div class="card-meta"><span>${icon('eye')} ${s.views}</span><span>${s.type==='video'?'Видео':'Фотоистория'}</span></div></div></button></article>`).join('');
 }
 async function load(){try{const response=await fetch('/api/stories');if(!response.ok)throw Error();stories=await response.json();render();openFromHash();}catch{$('#feed').innerHTML='<div class="load-error"><p>Не удалось загрузить истории.</p><button class="button button-outline" id="retry-load">Попробовать ещё раз</button></div>';$('#retry-load').onclick=load;}}
 function openFromHash(){const id=location.hash.match(/^#story=([a-z0-9-]+)$/)?.[1];if(!id)return;activeList=list();const index=activeList.findIndex(s=>s.id===id);if(index>=0)openStory(index);}
@@ -35,6 +35,8 @@ function openStory(index){
   media.onerror=()=>{paused=true;updatePause();toast('Не удалось открыть медиа. Переключитесь на следующую историю.');};
   const oldVideo=$('#story-media video');if(oldVideo){oldVideo.onended=null;oldVideo.pause();}
   $('#story-media').replaceChildren(media);
+  // Размытая копия кадра за медиа: иначе горизонтальное видео в рамке 9:16 лежит в чёрных полосах.
+  $('.viewer').style.setProperty('--story-bg',`url("${s.cover||s.src}")`);
   $('#story-title').textContent=s.title;$('#story-caption').textContent=s.caption;
   $('#story-time').textContent=s.demo?'Цветочное вдохновение':new Intl.DateTimeFormat('ru',{day:'numeric',month:'long'}).format(new Date(s.createdAt));
   $('#story-progress').innerHTML=activeList.map((_,i)=>`<div class="progress-track"><div class="progress-fill" style="width:${i<index?100:0}%"></div></div>`).join('');

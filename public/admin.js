@@ -1,9 +1,14 @@
 const $=(selector,root=document)=>root.querySelector(selector);
+const MAX_FILE=80*1024*1024;
+// Windows часто отдаёт пустой type для .mov и .heic, поэтому решаем по расширению: сервер всё равно проверяет сигнатуру байтов.
+const isVideoFile=file=>/\.(mp4|mov|webm)$/i.test(file.name)||file.type.startsWith('video');
+const isHeicFile=file=>/\.heic$/i.test(file.name)||/image\/hei/i.test(file.type);
+const isAllowedFile=file=>isVideoFile(file)||isHeicFile(file)||/\.(jpe?g|png|webp|gif)$/i.test(file.name)||file.type.startsWith('image');
 const symbols={plus:'<path d="M12 5v14M5 12h14"/>',x:'<path d="m6 6 12 12M6 18 18 6"/>','arrow-up-right':'<path d="M7 17 17 7M6 7h11v11"/>',grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',settings:'<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="currentColor"/><circle cx="16" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="18" r="2" fill="currentColor"/>',logout:'<path d="M9 4H4v16h5M10 12h11m-4-4 4 4-4 4"/>',eye:'<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',hide:'<path d="m3 3 18 18M10 5c7-1 12 7 12 7a19 19 0 0 1-4 4M6 6a20 20 0 0 0-4 6s3 7 10 7c2 0 4-1 5-2"/>',edit:'<path d="m15 4 5 5M3 21l5-1L21 7l-4-4L4 16l-1 5Z"/>',play:'<path d="m8 4 12 8-12 8Z"/>',chart:'<path d="M5 20V10M12 20V4M19 20v-7"/>',search:'<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>',grip:'<path d="M9 4v1m6-1v1M9 11v1m6-1v1M9 18v1m6-1v1"/>',flower:'<path d="M12 7C6-4-2 8 7 12c-11 6 1 14 5 5 6 11 14-1 5-5 11-6-1-14-5-5Z"/><circle cx="12" cy="12" r="3"/>',restore:'<path d="M4 4v6h6M4 10a8 8 0 1 1 0 6"/>',chat:'<path d="M21 11a9 9 0 0 1-13 8L3 21l1-6A9 9 0 1 1 21 11Z"/>',check:'<path d="m5 12 4 4L20 5"/>',upload:'<path d="M12 16V3m-5 5 5-5 5 5M4 16v4h16v-4"/>',up:'<path d="M12 20V4m-6 6 6-6 6 6"/>',down:'<path d="M12 4v16m-6-6 6 6 6-6"/>',image:'<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m3 17 5-5 4 4 4-7 5 7"/><circle cx="8" cy="8" r="1"/>'};
 const icon=name=>`<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${symbols[name]||''}</svg>`;
 document.querySelectorAll('[data-icon]').forEach(el=>el.outerHTML=icon(el.dataset.icon));
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let items=[],page='stories',status='all',search='',type='all',busy=false,editing=null,file=null,fileURL=null,editorDirty=false,editorSaving=false,settingsDirty=false,dragged=null,toastTimer,confirmResolve=null,settingsVersion=0;
+let items=[],page='stories',status='all',search='',type='all',busy=false,coverBusy=false,editing=null,file=null,fileURL=null,covers=[],coverPick=null,editorDirty=false,editorSaving=false,settingsDirty=false,dragged=null,toastTimer,confirmResolve=null,settingsVersion=0;
 const editor=$('#editor-dialog'),confirmDialog=$('#confirm-dialog'),preview=$('#preview-dialog');
 const activeItems=()=>items.filter(s=>!s.deletedAt);
 const canReorder=()=>page==='stories'&&status==='all'&&!search&&type==='all'&&!busy;
@@ -109,7 +114,65 @@ $('#admin-grid').addEventListener('drop',e=>{
   const id=dragged,ids=activeItems().map(s=>s.id),from=ids.indexOf(id),to=ids.indexOf(target);ids.splice(from,1);ids.splice(to,0,id);dragged=null;reorder(ids,id);
 });
 $('#admin-grid').addEventListener('dragend',()=>{dragged=null;document.querySelectorAll('.drag-over,.dragging').forEach(el=>el.classList.remove('drag-over','dragging'));});
-function clearFile(){if(fileURL)URL.revokeObjectURL(fileURL);fileURL=null;file=null;$('#editor-file').value='';}
+// Кадры читает браузер из локального файла: сервер ничего не перекодирует и не хранит лишнего.
+function grabFrames(videoFile,spots){
+  return new Promise(resolve=>{
+    const url=URL.createObjectURL(videoFile),video=document.createElement('video'),canvas=document.createElement('canvas'),results=[];
+    let settled=false;
+    const finish=()=>{if(settled)return;settled=true;clearTimeout(overall);video.removeEventListener('error',finish);video.remove();URL.revokeObjectURL(url);video.removeAttribute('src');resolve(results);};
+    const overall=setTimeout(finish,14000);
+    video.muted=true;video.playsInline=true;video.preload='auto';
+    video.style.cssText='position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+    document.body.appendChild(video);
+    video.addEventListener('error',finish);
+    const seek=time=>new Promise(done=>{
+      const stop=value=>{video.removeEventListener('seeked',ok);video.removeEventListener('error',bad);clearTimeout(timer);done(value);};
+      const ok=()=>stop(true),bad=()=>stop(false),timer=setTimeout(()=>stop(false),3500);
+      video.addEventListener('seeked',ok);video.addEventListener('error',bad);
+      try{video.currentTime=time}catch{stop(false);}
+    });
+    video.onloadedmetadata=async()=>{
+      const duration=Number(video.duration)||0;
+      if(!duration||!video.videoWidth||!video.videoHeight)return finish();
+      const width=Math.min(480,video.videoWidth),scale=width/video.videoWidth;
+      canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
+      const context=canvas.getContext('2d');
+      for(const spot of spots){
+        if(settled)break;
+        if(await seek(duration*spot)){
+          context.drawImage(video,0,0,canvas.width,canvas.height);
+          const data=canvas.toDataURL('image/jpeg',.7);
+          if(data.startsWith('data:image/jpeg;base64,'))results.push(data.slice(23));
+        }
+      }
+      finish();
+    };
+    video.src=url;
+  });
+}
+function paintCovers(){
+  $('#cover-options').innerHTML=covers.map((data,index)=>`<button type="button" class="cover-option${index===coverPick?' selected':''}" data-cover="${index}" aria-label="Кадр ${index+1}" aria-pressed="${index===coverPick}"><img src="data:image/jpeg;base64,${data}" alt=""></button>`).join('');
+}
+function resetCovers(){covers=[];coverPick=null;$('#cover-options').replaceChildren();$('#cover-picker').hidden=true;}
+const evenSpots=Array.from({length:6},(_,index)=>(index+.5)/6);
+function randomSpots(){
+  const spots=[];
+  for(let tries=0;tries<80&&spots.length<6;tries++){const value=.05+Math.random()*.9;if(spots.every(other=>Math.abs(other-value)>.08))spots.push(value);}
+  while(spots.length<6)spots.push(.05+Math.random()*.9);
+  return spots.sort((a,b)=>a-b);
+}
+async function buildCovers(videoFile,spots=evenSpots){
+  if(coverBusy)return;coverBusy=true;
+  resetCovers();$('#cover-picker').hidden=false;$('#cover-hint').textContent='Выбираем кадры из видео…';$('#cover-shuffle').disabled=true;paintCovers();
+  const frames=await grabFrames(videoFile,spots);
+  coverBusy=false;$('#cover-shuffle').disabled=false;
+  if(!frames.length){$('#cover-hint').textContent='Кадры прочитать не удалось.';return;}
+  covers=frames;coverPick=Math.floor(frames.length/2);paintCovers();
+  $('#cover-hint').textContent=`${frames.length} кадров из видео — выберите нужный`;
+}
+$('#cover-options').onclick=e=>{const button=e.target.closest('[data-cover]');if(!button)return;coverPick=Number(button.dataset.cover);paintCovers();editorDirty=true;};
+$('#cover-shuffle').onclick=()=>{if(file&&isVideoFile(file))buildCovers(file,randomSpots());};
+function clearFile(){if(fileURL)URL.revokeObjectURL(fileURL);fileURL=null;file=null;$('#editor-file').value='';resetCovers();}
 function displayMedia(s){
   const media=document.createElement(s.type==='video'?'video':'img');media.src=s.src;if(s.type==='video'){media.muted=true;media.playsInline=true;media.preload='metadata';}else media.alt='Предпросмотр публикации';
   $('#editor-media').replaceChildren(media);$('#editor-drop').classList.add('has-media');$('#file-prompt').textContent='Заменить фото или видео';
@@ -130,20 +193,40 @@ editor.addEventListener('cancel',e=>{e.preventDefault();closeEditor();});
 editor.addEventListener('close',()=>{const v=$('#editor-media video');v?.pause();$('#editor-media').replaceChildren();clearFile();});
 function chooseFile(next){
   if(!next)return;$('#editor-error').textContent='';
-  if(!['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm'].includes(next.type)){clearFile();if(editing)displayMedia(editing);else{$('#editor-media').replaceChildren();$('#editor-drop').classList.remove('has-media');}$('#editor-error').textContent='Выберите JPG, PNG, WebP, GIF, MP4 или WebM.';return;}
-  if(next.size>30*1024*1024){clearFile();if(editing)displayMedia(editing);else{$('#editor-media').replaceChildren();$('#editor-drop').classList.remove('has-media');}$('#editor-error').textContent='Максимальный размер — 30 МБ.';return;}
-  clearFile();file=next;fileURL=URL.createObjectURL(file);displayMedia({src:fileURL,type:file.type.startsWith('video')?'video':'image'});$('#editor-file-note').textContent=`${file.name} · ${(file.size/1024/1024).toFixed(1)} МБ`;editorDirty=true;
+  if(!isAllowedFile(next)){clearFile();if(editing)displayMedia(editing);else{$('#editor-media').replaceChildren();$('#editor-drop').classList.remove('has-media');}$('#editor-error').textContent='Выберите JPG, PNG, WebP, GIF, HEIC, MP4, MOV или WebM.';return;}
+  if(next.size>MAX_FILE){clearFile();if(editing)displayMedia(editing);else{$('#editor-media').replaceChildren();$('#editor-drop').classList.remove('has-media');}$('#editor-error').textContent=`Максимальный размер — ${MAX_FILE/1024/1024} МБ.`;return;}
+  clearFile();file=next;const label=`${file.name} · ${(file.size/1024/1024).toFixed(1)} МБ`;editorDirty=true;
+  // Браузер не показывает HEIC, поэтому превью не делаем: сервер всё равно сохранит из него обычный JPG.
+  if(isHeicFile(next)){$('#editor-file-note').textContent=`${label} — на сайте сохранится как JPG`;return;}
+  fileURL=URL.createObjectURL(file);displayMedia({src:fileURL,type:isVideoFile(file)?'video':'image'});$('#editor-file-note').textContent=label;if(isVideoFile(file))buildCovers(file);
 }
 $('#editor-file').onchange=e=>chooseFile(e.target.files[0]);
 for(const event of ['dragover','dragenter'])$('#editor-drop').addEventListener(event,e=>{e.preventDefault();$('#editor-drop').classList.add('drag-over');});
 for(const event of ['dragleave','drop'])$('#editor-drop').addEventListener(event,e=>{e.preventDefault();$('#editor-drop').classList.remove('drag-over');if(event==='drop')chooseFile(e.dataTransfer.files[0]);});
-const base64=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error('Не удалось прочитать файл.'));reader.readAsDataURL(file);});
+// Файл уходит на сервер потоком (не base64 внутри JSON), поэтому 80 МБ не превращаются в ~350 МБ в памяти.
+function uploadFile(file,onProgress){
+  return new Promise((resolve,reject)=>{
+    const request=new XMLHttpRequest();
+    request.open('POST','/api/admin/media');
+    request.upload.onprogress=e=>{if(e.lengthComputable)onProgress(Math.min(99,Math.round(e.loaded/e.total*100)));};
+    request.onload=()=>{
+      let result={};try{result=JSON.parse(request.responseText);}catch{}
+      if(request.status>=200&&request.status<300)resolve(result);else reject(Error(result.error||'Не удалось загрузить файл на сервер.'));
+    };
+    request.onerror=()=>reject(Error('Связь с сервером оборвалась — попробуйте ещё раз.'));
+    request.send(file);
+  });
+}
 $('#editor-form').onsubmit=async e=>{
   e.preventDefault();if(editorSaving)return;if(!editing&&!file){$('#editor-error').textContent='Добавьте фото или видео.';return;}
   editorSaving=true;const button=$('#save-editor');button.disabled=true;button.textContent='Сохраняем…';$('#editor-error').textContent='';
   const payload={title:$('#editor-title').value,caption:$('#editor-caption').value,bouquet:$('#editor-bouquet').value.trim(),status:$('#editor-status').value};
   try{
-    if(file)payload.data=await base64(file);if(editing)payload.expectedUpdatedAt=editing.updatedAt;
+    if(file){
+      const note=$('#editor-file-note'),label=`${file.name} · ${(file.size/1024/1024).toFixed(1)} МБ`;
+      payload.media=await uploadFile(file,percent=>{button.textContent=`Загружаем ${percent}%`;note.textContent=`${label} — загружаем ${percent}%`;});
+      if(isVideoFile(file))payload.cover=coverPick===null?null:covers[coverPick]||null;
+    }if(editing)payload.expectedUpdatedAt=editing.updatedAt;
     await api(editing?`/api/admin/stories/${editing.id}`:'/api/stories',{method:editing?'PATCH':'POST',body:JSON.stringify(payload)});
     editorDirty=false;editor.close();await refresh();toast(payload.status==='draft'?'Черновик сохранён':'История сохранена и опубликована');
   }catch(error){$('#editor-error').textContent=error.message;}finally{editorSaving=false;button.disabled=false;button.innerHTML='Сохранить историю '+icon('check');}
