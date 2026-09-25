@@ -17,8 +17,14 @@ function render(){
 async function load(){try{const response=await fetch('/api/stories');if(!response.ok)throw Error();stories=await response.json();render();openFromHash();}catch{$('#feed').innerHTML='<div class="load-error"><p>Не удалось загрузить истории.</p><button class="button button-outline" id="retry-load">Попробовать ещё раз</button></div>';$('#retry-load').onclick=load;}}
 function openFromHash(){const id=location.hash.match(/^#story=([a-z0-9-]+)$/)?.[1];if(!id)return;activeList=list();const index=activeList.findIndex(s=>s.id===id);if(index>=0)openStory(index);}
 $('#feed').onclick=e=>{const open=e.target.closest('[data-open]');if(open){activeList=list();openStory(activeList.findIndex(s=>s.id===open.dataset.open));}};
-function showDialog(dialog){dialog.returnFocus=document.activeElement;dialog.showModal();document.body.classList.add('modal-open');}
-function releaseDialog(event){document.body.classList.toggle('modal-open',!!document.querySelector('dialog[open]'));const focus=event?.target?.returnFocus;if(focus?.isConnected)focus.focus();}
+let scrollLockY=0;
+function lockPage(on){
+  if(on===document.documentElement.classList.contains('modal-lock'))return;
+  if(on){scrollLockY=window.scrollY;document.documentElement.classList.add('modal-lock');document.body.style.top=`-${scrollLockY}px`;}
+  else{document.documentElement.classList.remove('modal-lock');document.body.style.top='';window.scrollTo({top:scrollLockY,behavior:'instant'});}
+}
+function showDialog(dialog){dialog.returnFocus=document.activeElement;dialog.showModal();document.body.classList.add('modal-open');lockPage(true);}
+function releaseDialog(event){const open=!!document.querySelector('dialog[open]');document.body.classList.toggle('modal-open',open);lockPage(open);const focus=event?.target?.returnFocus;if(focus?.isConnected)focus.focus();}
 function openStory(index){
   if(index<0)return;
   if(index>=activeList.length){storyDialog.close();return;}

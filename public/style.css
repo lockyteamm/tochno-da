@@ -101,5 +101,8 @@ html,body{overflow-x:clip}
 @media(max-width:400px){.flower-left{width:42px}.flower-right{width:38px}}
 @media(max-width:640px){.flower-right{right:max(8px,calc(50% - 225px))}}
 @media(max-width:400px){.flower-right{right:6px}}
+html.modal-lock{overflow:hidden;overscroll-behavior:none}
+html.modal-lock body{position:fixed;left:0;right:0;bottom:0;width:100%;overflow:hidden}
+@media(hover:none) and (pointer:coarse){a:focus-visible,button:focus-visible{outline:none}}
 
 

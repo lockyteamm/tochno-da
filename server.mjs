@@ -134,10 +134,17 @@ const server = http.createServer(async(req,res)=>{
       if(!Array.isArray(ids)||ids.length!==active.length||new Set(ids).size!==ids.length||ids.some(id=>!active.some(s=>s.id===id)))return json(res,409,{error:'Состав ленты изменился. Обновите панель и повторите перестановку.'});
       const byId=new Map(active.map(s=>[s.id,s]));stories=[...ids.map(id=>byId.get(id)),...stories.filter(s=>s.deletedAt)];save();return json(res,200,stories);
     }
-    const adminStory=url.pathname.match(/^\/api\/admin\/stories\/([a-z0-9-]+)(\/restore)?$/);
+    const adminStory=url.pathname.match(/^\/api\/admin\/stories\/([a-z0-9-]+)(\/restore|\/purge)?$/);
     if(adminStory){
       const item=stories.find(s=>s.id===adminStory[1]);if(!item)return json(res,404,{error:'Публикация не найдена.'});
-      if(adminStory[2] && req.method==='POST'){
+      if(adminStory[2]==='/purge' && req.method==='POST'){
+        if(!item.deletedAt)return json(res,409,{error:'Сначала уберите публикацию в корзину.'});
+        const media=path.join(uploadDir,path.basename(String(item.src||'')));
+        stories=stories.filter(s=>s.id!==item.id);save();
+        if(media.startsWith(uploadDir+path.sep)&&fs.existsSync(media))fs.unlinkSync(media);
+        return json(res,200,{removed:item.id});
+      }
+      if(adminStory[2]==='/restore' && req.method==='POST'){
         if(!item.deletedAt)return json(res,409,{error:'Публикация уже восстановлена.'});
         item.deletedAt=null;item.status='draft';item.updatedAt=new Date().toISOString();save();return json(res,200,item);
       }

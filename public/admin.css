@@ -46,3 +46,5 @@
 }
 @media(max-width:560px){.admin-grid{grid-template-columns:minmax(0,1fr)}.admin-card-media{height:260px}.admin-card-actions .edit-card{flex:1 0 100%;width:auto}.admin-card-description{min-height:0}.admin-card-copy h3{white-space:normal}}
 @media(max-width:360px){.admin-nav button{font-size:var(--text-xs);padding-left:5px;padding-right:5px}.admin-tabs{flex-wrap:wrap}.admin-tabs button{min-width:90px}.admin-mobile-actions{gap:10px}.editor-footer{flex-wrap:wrap}.editor-footer .button{flex-basis:100%}}
+.edit-card.purge-card{color:var(--red)}
+.edit-card.purge-card:hover{background:#fcebec}
