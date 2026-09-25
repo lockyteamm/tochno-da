@@ -109,11 +109,11 @@ function displayMedia(s){
   const media=document.createElement(s.type==='video'?'video':'img');media.src=s.src;if(s.type==='video'){media.muted=true;media.playsInline=true;media.preload='metadata';}else media.alt='Предпросмотр публикации';
   $('#editor-media').replaceChildren(media);$('#editor-drop').classList.add('has-media');$('#file-prompt').textContent='Заменить фото или видео';
 }
-function updateCounts(){$('#title-count').textContent=`${$('#editor-title').value.length} / 80`;$('#caption-count').textContent=`${$('#editor-caption').value.length} / 400`;$('#editor-status-note').textContent=$('#editor-status').value==='draft'?'Черновик виден только администрации.':'История будет видна посетителям сайта.';}
+function updateCounts(){$('#title-count').textContent=`${$('#editor-title').value.length} / 80`;$('#caption-count').textContent=`${$('#editor-caption').value.length} / 400`;$('#bouquet-count').textContent=`${$('#editor-bouquet').value.length} / 300`;$('#editor-status-note').textContent=$('#editor-status').value==='draft'?'Черновик виден только администрации.':'История будет видна посетителям сайта.';}
 function openEditor(s=null){
   editing=s;clearFile();$('#editor-form').reset();$('#editor-media').replaceChildren();$('#editor-drop').classList.remove('has-media');$('#file-prompt').textContent='Добавьте фото или видео';$('#editor-error').textContent='';
   $('#editor-heading').textContent=s?'Редактировать историю':'Новая история';$('#editor-eyebrow').textContent=s?'КАЖДАЯ ДЕТАЛЬ ВАЖНА':'НОВЫЙ МОМЕНТ';
-  $('#editor-title').value=s?.title||'';$('#editor-caption').value=s?.caption||'';$('#editor-status').value=s?.status||'draft';
+  $('#editor-title').value=s?.title||'';$('#editor-caption').value=s?.caption||'';$('#editor-bouquet').value=s?.bouquet||'';$('#editor-status').value=s?.status||'draft';
   $('#editor-file-note').textContent=s?'Можно заменить фото или видео — название и описание сохранятся.':'Вертикальные фото и видео особенно красиво выглядят в сторис.';
   if(s)displayMedia(s);updateCounts();editorDirty=false;show(editor);
 }
@@ -136,7 +136,7 @@ const base64=file=>new Promise((resolve,reject)=>{const reader=new FileReader();
 $('#editor-form').onsubmit=async e=>{
   e.preventDefault();if(editorSaving)return;if(!editing&&!file){$('#editor-error').textContent='Добавьте фото или видео.';return;}
   editorSaving=true;const button=$('#save-editor');button.disabled=true;button.textContent='Сохраняем…';$('#editor-error').textContent='';
-  const payload={title:$('#editor-title').value,caption:$('#editor-caption').value,status:$('#editor-status').value};
+  const payload={title:$('#editor-title').value,caption:$('#editor-caption').value,bouquet:$('#editor-bouquet').value.trim(),status:$('#editor-status').value};
   try{
     if(file)payload.data=await base64(file);if(editing)payload.expectedUpdatedAt=editing.updatedAt;
     await api(editing?`/api/admin/stories/${editing.id}`:'/api/stories',{method:editing?'PATCH':'POST',body:JSON.stringify(payload)});

@@ -40,7 +40,7 @@ function contactURL(name,raw,message){
   }catch{return null;}
 }
 function renderContacts(story){
-  const message=story?`Здравствуйте! Мне понравилась история «${story.title}». Хочу похожий букет.`:'Здравствуйте! Хочу заказать букет.';
+  const message=story?`Здравствуйте! Мне понравилась история «${story.title}».${story.bouquet?` Состав букета: ${story.bouquet}.`:''} Хочу такой же букет!\n${location.origin}/#story=${story.id}`:'Здравствуйте! Хочу заказать букет.';
   let missing=false;
   for(const name of ['max','telegram','whatsapp']){
     const link=$('#contact-'+name);const url=contactURL(name,contacts?.[name],message);
@@ -66,4 +66,12 @@ document.querySelectorAll('[data-location-open]').forEach(button=>button.onclick
 $('#close-location').onclick=()=>locationDialog.close();
 locationDialog.onclick=e=>{if(e.target===locationDialog)locationDialog.close();};
 locationDialog.addEventListener('close',e=>{releaseDialog(e);$('#location-map').removeAttribute('src');});
+const menuDialog=$('#menu-dialog'),menuButton=$('#menu-button');
+if(menuButton&&menuDialog){
+  menuButton.onclick=()=>showDialog(menuDialog);
+  $('#close-menu').onclick=()=>menuDialog.close();
+  menuDialog.onclick=e=>{if(e.target===menuDialog)menuDialog.close();};
+  menuDialog.addEventListener('click',e=>{if(e.target.closest('.menu-item'))menuDialog.close();});
+  menuDialog.addEventListener('close',releaseDialog);
+}
 checkSession();loadContacts();

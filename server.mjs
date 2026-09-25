@@ -47,8 +47,9 @@ function fail(message,status=400){const error=new Error(message);error.status=st
 function textFields(input){
   if(typeof input.title!=='string'||!input.title.trim()||input.title.length>80)fail('Введите название до 80 символов.');
   if(input.caption!==undefined&&(typeof input.caption!=='string'||input.caption.length>400))fail('Описание должно быть не длиннее 400 символов.');
+  if(input.bouquet!==undefined&&(typeof input.bouquet!=='string'||input.bouquet.length>300))fail('Состав букета должен быть не длиннее 300 символов.');
   if(input.status!==undefined&&!['published','draft'].includes(input.status))fail('Неизвестный статус публикации.');
-  return {title:input.title.trim(),caption:input.caption||'',status:input.status||'published'};
+  return {title:input.title.trim(),caption:input.caption||'',bouquet:typeof input.bouquet==='string'?input.bouquet.trim():'',status:input.status||'published'};
 }
 function storeMedia(data){
   if(typeof data!=='string'||!/^[A-Za-z0-9+/]+={0,2}$/.test(data))fail('Не удалось прочитать файл.');
